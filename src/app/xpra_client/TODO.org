@@ -1,0 +1,24 @@
+#+TITLE: Xpra TODO
+* TODO Do the startup-complete window-preservation idea (ON HOLD)
+  The idea is - if a connection is lost, windows/nitpicker connections aren't destroyed.
+  The only difficulty is that Windows hold references to some shared sessions/types held in the Client object.
+  If the client object is destroyed (on disconnect), then these are also destroyed.
+* TODO Handle disconnect properly
+* TODO Destroy or keep windows on configuration changes
+* DONE Have XML configuration
+* TODO Clean up the bencode parser
+* TODO Support window title changes
+* TODO Alpha support
+* TODO Optimize the bencode serializer, and simplify it
+* TODO Rename methods in the Strechy_Buffer, and in the Callback_handler classes
+* TODO Consider combining util's Mapping and the encoder's assoc, and make the encoder's assoc a template
+* TODO Remove the integer key dict in keymap.cc
+* TODO Fix modifier keys (send modifier key info to the server)
+* TODO Track button state properly (just as we do for modifier keys)
+* TODO Remove an RPC call in buffering (buffer the length ahead of time if possible).
+* TODO Finish fuzzer for bencode parser.
+* TODO Allow bencode parser to function without a character at the end.
+* TODO Handle window-metadata packets
+* TODO Handle window size increments properly
+* DONE Create separate window classes
+* DONE Share timer sessions between windows

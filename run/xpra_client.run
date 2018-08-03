@@ -1,0 +1,134 @@
+create_boot_directory
+
+import_from_depot genodelabs/src/[base_src] \
+		  genodelabs/pkg/[drivers_interactive_pkg] \
+		  genodelabs/pkg/wm \
+		  genodelabs/src/init \
+		  genodelabs/src/vfs \
+		  genodelabs/src/libc \
+		  genodelabs/src/nitpicker
+#		  genodelabs/src/stdcxx
+
+source ${genode_dir}/repos/base/run/platform_drv.inc
+
+set build_components { app/xpra_client drivers/nic lib/vfs/lxip }
+append_platform_drv_build_components
+
+set config {}
+append config {
+<config>
+  <parent-provides>
+	<service name="IO_MEM"/>
+	<service name="IO_PORT"/>
+	<service name="IRQ"/>
+
+	<service name="ROM"/>
+	<service name="PD"/>
+	<service name="RM"/>
+	<service name="RAM"/>
+	<service name="CPU"/>
+	<service name="LOG"/>
+  </parent-provides>
+
+  <default-route>
+	<any-service> <parent/> <any-child/> </any-service>
+  </default-route>
+  <default caps="125"/>
+
+  <!-- Drivers -->
+  <start name="nic_drv" caps="130" ld="no">
+	<binary name="} [nic_drv_binary] {"/>
+	<resource name="RAM" quantum="20M"/>
+	<provides> <service name="Nic"/> </provides>
+	} [nic_drv_config] {
+  </start>
+
+  <start name="xpra_client" caps="300">
+	<resource name="RAM" quantum="64M"/>
+
+	<route>
+	  <service name="Nitpicker"> <child name="wm"/> </service>
+	  <any-service> <parent/> <any-child/> </any-service>
+	</route>
+
+	<config addr="10.0.2.1" port="9999">
+	  <vfs>
+		<dir name="dev"> <log/> </dir>
+		<!-- <dir name="tmp"> <ram/> </dir> -->
+		<dir name="socket">
+		  <lxip ip_addr="10.0.2.55"
+				netmask="255.255.255.0"
+				gateway="10.0.2.1"
+				nameserver="8.8.8.8"/>
+		</dir>
+
+	  </vfs>
+	  <libc stdout="/dev/log" stderr="/dev/log" socket="/socket"/>
+	</config>
+  </start>
+
+  <!-- Nitpicker -->
+  <start name="timer">
+    <resource name="RAM" quantum="1M"/>
+    <provides> <service name="Timer"/> </provides>
+  </start>
+
+  <start name="drivers" caps="1000">
+    <resource name="RAM" quantum="32M" constrain_phys="yes"/>
+    <binary name="init"/>
+    <route>
+      <service name="ROM" label="config"> <parent label="drivers.config"/> </service>
+      <service name="Timer"> <child name="timer"/> </service>
+      <any-service> <parent/> </any-service>
+    </route>
+    <provides>
+      <service name="Input"/> <service name="Framebuffer"/>
+    </provides>
+  </start>
+
+  <start name="nitpicker">
+    <resource name="RAM" quantum="8M"/>
+    <provides> <service name="Nitpicker"/> </provides>
+    <config focus="rom">
+      <domain name="pointer" layer="1" content="client" label="no" origin="pointer"/>
+      <domain name="general" layer="2" content="client" focus="click" label="no" hover="always"/>
+      <policy label_prefix="pointer" domain="pointer"/>
+      <default-policy domain="general"/>
+    </config>
+  </start>
+
+  <start name="pointer">
+    <resource name="RAM" quantum="2M"/>
+    <route>
+      <service name="Nitpicker"> <child name="nitpicker"/> </service>
+      <any-service> <parent/> <any-child/> </any-service>
+    </route>
+  </start>
+
+  <start name="wm" caps="1000">
+    <resource name="RAM" quantum="32M"/>
+    <binary name="init"/>
+    <provides> <service name="Nitpicker"/> </provides>
+    <route>
+      <service name="ROM" label="config"> <parent label="wm.config"/> </service>
+      <service name="Nitpicker"> <child name="nitpicker"/>  </service>
+      <any-service> <parent/> <any-child/> </any-service>
+    </route>
+  </start>
+}
+
+append_platform_drv_config
+append config { </config> }
+install_config $config
+
+set fd [open [run_dir]/genode/focus w]
+puts $fd "<focus label=\"wm -> wm -> \"/>"
+close $fd
+
+set boot_modules { xpra_client vfs_lxip.lib.so lxip.lib.so libc.lib.so lz4.lib.so zlib.lib.so }
+append boot_modules [nic_drv_binary]
+append_platform_drv_boot_modules
+
+build $build_components
+build_boot_image $boot_modules
+run_genode_until forever

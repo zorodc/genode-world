@@ -1,0 +1,165 @@
+#+TITLE: Genode Xpra Client Documentation
+#+AUTHOR: Daniel Collins
+* Introduction
+  This client supports, at the moment, a minimal subset of the Xpra protocol.
+  It supports mapping regular windows and override-redirect windows, and drawing RGB24 or RGB32 data to them.
+  It supports decompressing said RGB data, but does not support decompression of bencode packets.
+
+  Ideally, it will remain under or around 1500-1600 SLOC, and carry no dependency on the C++ STL.
+
+  Note that most logic for responding to an encoded message of a certain type is found within the handler for that kind of message.
+  This was done with the intention of simplifying the logic at the (in practice, unfelt) cost of reduced flexibility.
+  As a consequence, the size of a handler depends upon the complexity of the message it seeks to handle, and the variance of behavior exhibited by the Xpra server for that message. Some handlers are nontrivial.
+* Using it
+  Use is rather simple. See the run/xpra_client.run file for an example.
+  It connects to an IPv4 address and a port, each of which are provided as attributes.
+  addr="..." port="..."
+
+* Protocol Observations
+** Preamble
+   It has often been hard is discern what the proper behavior is for an Xpra client - Some interractions with the server function perfectly well without any determination that this will remain the case, whereas others fail without an indication as to whether this will remain the case.
+   Most experiences with these phenomena were anecdotal and hence not worth documenting here, but some are alluded to. Some information on the minor (but hopefully temporary) hacks made to accomodate strangeness of some observed behavior are, however, available in the 'Quirks of Implementation' section.
+   These quirks should disappear as it is made more clear what the precise behavior of the server is, and what mistakes (in the implementation of the client) were made that appeared to expose some absurdity.
+
+   Much of what the author observed was determined via experimentation, which although thought the most reliable form of deriving knowledge in the empirical epistemological tradition, one finds that when dealing with something quite non-deterministic in nature, experimentation is not necessarily the most reliable teacher.
+   This was especially the case with Xpra, which exhibited a surprising degree of variability with respect to the behavior it exhibited, under various conditions. The author chalks most of this effect up to his client, with its limited and distinct feature-set, causing the server to walk down less recently tested code paths.
+   Any faults of the client are the author's alone. Note however, that he experienced some difficulty in ascertaining the "most correct" behavior in some cases. He consequently offers an account of how some behavior was reasoned at, and where one might look to replicate that reasoning (or establish a counterargument), here.
+
+   Don't take any of the observations contained herein as Gospel-truth. It's perfectly concievable that some of the quirks observed stem from bugs in my client, rather than in the server, or improper adherence to the protocol.
+
+*** Rationale
+   I seek to document some shortcomings of my implementation, unanswered questions, ect. here, as well as offer any kindred spirits some knowledge I believe to have attained in writing this client. This is both a dumping ground and a form of documentation - take its claims and admonitions with a few grains of salt. The highest authority on Xpra is not this document, but the official clients' source code.
+
+** Sources
+   There are a myriad of places one can look for information on the behavior of the Xpra server, an understanding of which is paramount in attempting to handle this behavior (which has quite a few permutations) in a client.
+
+   There is some quite useful, centralized network protocol documentation, but it is outdated and fairly vague.
+   One can often find information about the behavior expected or exhibited by the server through dissecting bencoded packets sent, by using wireshark, looking at diagnostics printed by the Xpra server (these, in particular, can be quite wonderful guides), and looking at the source code.
+   Given that the flagship Xpra server and client pair, written in Python, were designed to support a variety of backends and use cases, the code is complex and quite dynamic.
+   As a consequence, it isn't always easy to determine from, let us say, the naeve perspective of the author's - a novice Python reader, which code paths are really taken at runtime, with one's client.
+   The HTML Xpra client, written in ECMAScript, carries less complete support for the full feature set of Xpra, and is therefore, in the author's opinion, easier to understand more quickly. It is, for example, only a few source files. One usually needn't even employ 'grep' in search of operant code.
+
+** General Notes
+*** X-isms
+   Some of Xpra's behavior is apparently derived from X's behavior. This is, perhaps in part, because the server the author studied was the one written for X11, though the HTML client carries with it many of the same X-isms.
+   Xpra apparently supports acting as a server for non-X desktops (Quartz on OSX, Explorer on Windows) - the author suspects most of the same X-isms must be emulated for these backends, but quite how many is difficult to speculate about without a thorough investigation into the backends that communicate with these window systems.
+
+   An example of this are button and keyboard input, which, judging from the HTML Client, appear to generally revolve around the established X11 representations of input - (mouse) button presses are encoded with particular integers that denote the button pressed, mouse scrolling is represented as a series of button press events, and key presses are represented as X11 keysyms and X11 keycodes.
+   One can provide one's own mappings from X11 keycodes and keysyms, which this Xpra client does - as Nitpicker has no notion of keysyms, nor keycodes, a large table found in 'keyboard.cc' lists transformations, and is serialized into a packet that Xpra understands as a keycode configuration.
+
+   Xpra's behavior can vary, but this appears to be largely consequent of X clients having varying behavior.
+   The primary example the author encountered is the number of different forms a draw packet can take.
+
+*** Optimizations
+   Xpra places someting of an onus on the client to support various (sometimes non-optional) features as optimizations.
+   While it is certainly a necessity for a remote desktop client run with acceptible performance, and must optimize to be able to do so over a channel not ordinarily amenable to reliability and large-scale transfers (the internet), Xpra seems to have gone through a small history of selecting technologies not known for their performance, with there soon following retroactive efforts taken to improve performance.
+   Xpra runs reasonably quickly, and quite reliably, but bear in mind that, as a general principle, several optimizations exist that can make surveiling with the official client and server more difficult.
+   Fortunately, most of these optimizations are optional.
+
+   For example, the official Xpra client and server may discover their sharing the same machine, and begin transfering RGB data over shared memory.
+   Additionally, unless told otherwise, they will use "rencode," rather than bencode, because the parser and serializer are faster. Furthermore, nested within the "hello" packet, will be a table mapping messages to integer keys, such that bencoded messages can be identified with an integer, rather than a string. Presumably, this is to make the serialization and parsing of these messages, as well as the lookup and dispatch of packet handlers, faster. One can disable this by setting the XPRA_USE_ALIASES environment variable to 0.
+   The official server and client may also compress encoded control messages larger than a certain threshold.
+   The normally 8-byte header of an Xpra message is also larger in communications between the official server and client, which ordinarily contains the size of uncompressed data. See: http://xpra.org/trac/changeset/207/xpra
+   At the moment, none of the aforementioned optimizations are implemented by the author's client. The author suspects that, if they were, the primary performance gains would be felt on the server's side. As a consequence, they may be worth implementing at some point, independent of their impact on the performance of the client proper.
+
+** Protocol Constructs
+   Some patterns observed in the protocol are noted here.
+
+   - Window IDs are simple integers, ostensibly allocated more or less contiguously, starting from 1.
+   - Each message is a list, with the first element being the type of the message as a string or, (if enabled) as an optimization, potentially an integer.
+   - Cartesian points or dimensions are often sent as adjacent members of the above list.
+   - The typical order is: message-type window-id x-coord y-coord width height ...
+   - That is, if a window is the subject of a message, its ID comes first, then if some region of the window is at issue, the point and then the area of the region follow in the above manner.
+   - Clients can send capability information in their "hello" packets, which are simply dictionary entries.
+   - Specifying preferences and support inside of a dictionary is commonly done.
+
+** Draw Messages
+   With respect to a draw packet, there are a few variables at play that determine what permutation or form the draw packet takes.
+
+   The draw packet can have an RGB buffer preceeding it, as a distinct "raw" packet, that is, one without any bencoded text, or the RGB can be inline.
+   These draw packets have, in the chunk_idx byte of their header, a positive integer, as opposed to the ordinary 0.
+   This integer corresponds to the position in a bencoded packet that the raw data stands in the place of, which I have observed to always contain an empty bencoded string: "0:", instead of its ordinary contents - typically an RGB buffer.
+
+   Secondly, a draw packet can contain data with various RGB encodings. There is a field that labels either "rgb32," or "rgb24," since these are the two formats our client reports support for.
+   (Although, if we didn't advertise support for "rgb24," the server will still send us packets with that label and the implied contents anyways.)
+   A draw packet also lists its color ordering, which our client specifies must be one of the following: "RGBX", "RGBA", "BGRX", "BGRA." Curiously, these appear to be inverted. See the 'Confounding Observations' section for more information.
+   A draw packet may also contain a boolean inside a dictionary delineating whether the data is transparent or not.
+
+   The draw packet has a width stride parameter (in bytes), which, last I checked, was ignored in the HTML client, which appears to indicate that the width stride parameter doesn't hold any suprises when one is transferring RGB data with Xpra over synchronous channels.
+
+   Draw packets labelled as carrying "rgb24" data may contain either rgb32 with the alpha set to 0xFF (essentially RGBX), or they can contain actual RGB24.
+   The author believes the factor distinguishing these two cases is the aforementioned "transparency" boolean, but this client currently checks the width stride to differentiate between them.
+
+   Draw packets can also be compressed, with one of (at the moment) three compression formats. The compression format is specified in (according to the HTML client source code) an optional dictionary.
+   This Xpra client currently supports both zlib and lz4. If the server specifies a configuration dictionary but this dictionary does not contain one of these two compression formats, it is assumed the data contained therein is uncompressed, and a diagnostic is printed. It is unknown whether this is truly correct, though I have not seen any errant noise thus far at times when this diagnostic is printed.
+
+   Draw packets can also come in other formats, such as those that refer to shared memory pages, but the author has not explored these depths of draw-packet nuance.
+
+** Strange Observations and Unanswered Questions
+   Here are some strange things observed in writing this client. Some of the observations may be of my own making - perhaps improper interraction with the server, or simple mistakes produced these problems.
+   This has proven to be the case for some of the strange behavior I encountered, but these issues remain, partially because they haven't been thoroughly investigated, sometimes because they cannot easily be investigated.
+   In any case, they are worth documenting.
+
+   - The client will every so often recieve packets it doesn't understand (can't parse). This isn't fatal - it can reliably skip them with no apparent adverse consequences. However, they are strange. Usually they are quite small.
+   - The server appears to send RGB data in BGR order, and vice-versa. See 'Quirks of Implementation' for more info.
+   - LZ4-compressed packets are always preceeded by a 4-byte little-endian (yes, little-endian!) marker delineating the size of the message after decompression. This isn't done for other compression backends. It appears as though this is done because the libraries the author of Xpra used for these formats don't require such a length, excepting the LZ4 one.
+   - RGB data varies in its type per-window. There's an awful lot of variance.
+   - The "encodings" capability lists valid image encodings my client supports. What is strange, is in my testing, one MUST specify BOTH 'rgb' and 'rgb24' or 'rgb32' otherwise the server will produce some rather confounding diagnostics and then close the connection. Capability data sent to the server is available in the 'protocol.h/cc' files.
+   - The server doesn't appear to support sending uncompressed RGB data, as if one informs it (with command line arguments) to not load any compression backend, it will fail to function. Though, the ability to send uncompressed RGB data was (IIRC) mentioned as a capbility on the bug tracker.
+   - RGB labeled in the 'draw' packet as having the "RGB24" format will either be RGBX (32-bit), or will be 24-bit RGB. There may be some way of distinguishing both cases, but for now it is done by checking the width stride field. (As mentioned earlier).
+   - Last I checked, the HTML Xpra client passes the width stride field around, but ends up doing nothing with it. It probably is of most use when using mmap with Xpra.
+
+* Code Guide
+- Incomplete -
+** Abstractions
+   In the code, a signal-handler-like notification and subscription mechanism is used for registering packet handlers.
+   It is also used for having things like windows (which manage a nitpicker and input session) report to the Client object that created them about these events.
+   This is so that things like these windows (for example) don't have to do networking, and the client can recieve events about what its child objects are doing, and relay this information to the server itself.
+   This is a bit heavy handed and feels too "object-oriented", but it makes looking for networking logic a bit easier, perhaps.
+
+   The 'strview' type is used quite a lot - it's an immutable view into another string. It's used for passing around chunks of binary and string data, pulled from packets for example.
+
+   A Strechy_Buffer type is used to store information and grow to accept more. It, essentially, can be resized, store data, and be instructed to keep some data upon a resize.
+   It grows and conservatively shrinks the underlying buffer automatically.
+
+   Some types resembling signal handlers abstract Genode's Select_handler and conveniently buffer incomming messages. These can be found in select_io.h
+   It feels like overkill to define these types, but it isn't unnecessary - Select_handler requires that one schedules future firings, and doing this takes a non-trivial amount of code.
+   Consequently, placing that logic in its own type prevents that irrelevant logic from muddling up other parts of the code.
+   Additionally, buffering is necessary because Xpra sends (for example) RGB data before it sends the (draw) packet that defines where the RGB data is to be used.
+   In any case, these abstractions are useful, but if they can be replaced with something simpler, then this should be done.
+
+** Quirks of Implementation
+   Window geometry properties are completely ignored. See 'Bugs' for more information.
+
+   Currently, a window is treated as "fixed," that is, its size does not change, and is created as a view which has some other window as a parent, if the xpra server specifies a dictionary entry "transient-for" with the ID of a parent window.
+   This appears to work reasonably well, but may not work everywhere. And, for example, it precludes resizing of these child windows.
+
+   The client never pings the server. The ping packet is implemented, but never used.
+   I haven't seen any problems caused by this so far.
+
+   The server appears to send RGB data in BGR order. However, if one specifies a BGRX format, it sends it in BGR order.
+   As a 'solution,' this client lists its support for BGR in the list of supported window formats before its support for RGB, and consequently windows appear fine on screen.
+
+* Future Directions
+  This client ignores window-metadata packets.
+  This client does not currently support an alpha channel, nor does it handle the clipboard.
+
+  The updating the cursor with textures sent by the server (in cursor messages - one must send a capability in the hello packet to enable them, this is documented in Xpra's "Network Protocol page"), might be nice.
+
+  If the window manager orders a window to be closed, this is not handled.
+
+  See the TODO.org file for some future plans.
+
+* Bugs
+  The bencode parser assumes that an extra byte past the end of the string is present. This should be changed.
+
+  Some helper classes should be removed. This isn't a bug, but I count it as not seeking the forest for the trees.
+
+  If it is possible to get this client under 1000-1200 lines of code, that would be an interesting goal.
+
+  Not all Genode scancodes are present in the keysym table. This is easy to fix - just add them.
+
+  Modifier keys (alt, control, shift) don't work at present. Making them work simply involves generating a static table of their presence and representation, and sending it to the server.
+
+  This client ignores some attributes of window geometry. Window geometry properties specify the granularity that a window supports for resizes, for example.
+  It ignores minimum and maximum size limits, starting size limits, ect. It does increment by the resize granularity, but potentially not correctly.
